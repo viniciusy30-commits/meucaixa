@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.MeuCaixa" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#3DDC97</item>
+        <item name="colorOnPrimary">#0D1117</item>
+        <item name="colorSurface">#161B22</item>
+        <item name="android:colorBackground">#0D1117</item>
+        <item name="android:windowBackground">#0D1117</item>
+        <item name="android:statusBarColor">#0D1117</item>
+        <item name="android:navigationBarColor">#161B22</item>
+    </style>
+</resources>

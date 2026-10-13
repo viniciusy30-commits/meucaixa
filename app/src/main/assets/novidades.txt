@@ -1,0 +1,7 @@
+#id 2026-10-13-a
+#titulo Primeira versão do Meu Caixa
+- Cadastre suas fontes de renda e marque quando já recebeu
+- Registre gastos com data e categoria e marque quando pagou
+- Veja em tempo real quanto vai sobrar até o fim do mês
+- Rendas e gastos mensais se repetem sozinhos
+- Atualização pelo próprio app em Ajustes
