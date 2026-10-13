@@ -1,3 +1,10 @@
+#id 2026-10-13-b
+#titulo Períodos e valores
+- Nova aba Períodos: escolha de que data até que data quer acompanhar
+- Veja quanto vai sobrar até o fim do período, atualizado conforme você marca o que recebeu e pagou
+- Crie, edite e apague períodos quando quiser
+- Corrigido o valor cortado nos lançamentos
+
 #id 2026-10-13-a
 #titulo Primeira versão do Meu Caixa
 - Cadastre suas fontes de renda e marque quando já recebeu

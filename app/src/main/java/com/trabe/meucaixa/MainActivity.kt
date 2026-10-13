@@ -16,6 +16,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
@@ -92,7 +93,8 @@ class MainActivity : AppCompatActivity() {
             Triple("home", "Resumo", 0),
             Triple("up", "Rendas", 1),
             Triple("down", "Gastos", 2),
-            Triple("gear", "Ajustes", 3)
+            Triple("cal", "Períodos", 3),
+            Triple("gear", "Ajustes", 4)
         )
         for ((kind, label, idx) in defs) {
             val c = vbox()
@@ -137,7 +139,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onFab() {
-        if (tab == 1) showItemDialog(true, null)
+        if (tab == 3) periodDialog(null)
+        else if (tab == 1) showItemDialog(true, null)
         else if (tab == 2) showItemDialog(false, null)
         else {
             AlertDialog.Builder(this)
@@ -159,11 +162,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun render(animate: Boolean) {
         anim = animate
-        if (tab != 3) store.ensure(ym)
+        if (tab < 3) store.ensure(ym)
+        if (tab == 3) ensurePeriods()
         body.removeAllViews()
         monthLabel.text = Dates.label(ym)
-        monthBar.visibility = if (tab == 3) View.GONE else View.VISIBLE
-        fab.visibility = if (tab == 3) View.GONE else View.VISIBLE
+        monthBar.visibility = if (tab >= 3) View.GONE else View.VISIBLE
+        fab.visibility = if (tab == 4) View.GONE else View.VISIBLE
 
         val sv = ScrollView(this)
         sv.isVerticalScrollBarEnabled = false
@@ -175,6 +179,7 @@ class MainActivity : AppCompatActivity() {
             0 -> home(col)
             1 -> list(col, true)
             2 -> list(col, false)
+            3 -> periods(col)
             else -> settings(col)
         }
         sv.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
@@ -486,6 +491,7 @@ class MainActivity : AppCompatActivity() {
         val amountColor = if (x.income) Pal.GREEN else Pal.TEXT
         val amount = tv((if (x.income) "+ " else "- ") + Fmt.money(x.cents), 15f, amountColor, true)
         amount.gravity = Gravity.END
+        amount.isSingleLine = true
         right.addView(amount)
 
         val od = isOverdue(x)
@@ -517,6 +523,182 @@ class MainActivity : AppCompatActivity() {
         right.addView(chip, cl)
         row.addView(right, lp(WRAP, WRAP))
         return row
+    }
+
+
+    // ---------------------------------------------------------------- períodos
+
+    private fun ensurePeriods() {
+        for (p in store.periods) {
+            var m = p.start / 100
+            val last = p.end / 100
+            while (m <= last) {
+                store.ensure(m)
+                m = Dates.add(m, 1)
+            }
+        }
+    }
+
+    private fun periods(col: LinearLayout) {
+        val title = tv("Períodos", 24f, Pal.TEXT, true)
+        title.setPadding(dp(4), dp(14), 0, dp(4))
+        col.addView(title)
+        val sub = tv("Escolha de que data até que data você quer acompanhar. A previsão atualiza sozinha conforme você marca o que recebeu e pagou.", 13f, Pal.MUTED)
+        sub.setPadding(dp(4), 0, dp(4), dp(14))
+        col.addView(sub)
+        if (store.periods.isEmpty()) {
+            val e = vbox()
+            e.gravity = Gravity.CENTER
+            e.setPadding(0, dp(40), 0, dp(20))
+            e.addView(iconBadge("cal", Pal.BLUE, 72), lp(dp(72), dp(72)))
+            val t = tv("Nenhum período criado", 16f, Pal.TEXT, true)
+            t.setPadding(0, dp(14), 0, dp(4))
+            e.addView(t)
+            e.addView(tv("Toque no + para criar um (ex.: de hoje até o próximo salário)", 13f, Pal.MUTED))
+            col.addView(e, lp(MATCH, WRAP))
+            enter(e, 0)
+        } else {
+            store.periods.forEachIndexed { i, p ->
+                val v = periodCard(p)
+                col.addView(v, gap(16))
+                enter(v, i)
+            }
+        }
+    }
+
+    private fun periodCard(p: Period): View {
+        val items = store.periodItems(p)
+        var got = 0L
+        var toGet = 0L
+        var paid = 0L
+        var toPay = 0L
+        for (i in items) {
+            if (i.income) {
+                if (i.done) got += i.cents else toGet += i.cents
+            } else {
+                if (i.done) paid += i.cents else toPay += i.cents
+            }
+        }
+        val proj = store.projectedAt(p.end)
+
+        val wrap = vbox()
+        val card = cardBox()
+        val head = hbox()
+        head.isClickable = true
+        head.setOnClickListener { periodDialog(p) }
+        head.addView(tv(p.name, 17f, Pal.TEXT, true), lp(0, WRAP, 1f))
+        head.addView(IconView(this, "edit", Pal.MUTED), lp(dp(20), dp(20)))
+        card.addView(head, lp(MATCH, WRAP))
+        card.addView(tv(Dates.keyLabel(p.start) + " até " + Dates.keyLabel(p.end), 12f, Pal.MUTED))
+        val d1 = lp(MATCH, 1)
+        d1.setMargins(0, dp(12), 0, dp(12))
+        card.addView(divider(), d1)
+        card.addView(tv("Vai sobrar até " + "%02d/%02d".format(p.end % 100, (p.end / 100) % 100), 13f, Pal.MUTED))
+        val pt = tv(Fmt.money(proj), 28f, if (proj >= 0) Pal.GREEN else Pal.RED, true)
+        animMoney(pt, proj)
+        card.addView(pt)
+
+        val today = Dates.todayKey()
+        val status: String
+        if (today > p.end) {
+            status = "Período encerrado"
+        } else {
+            val from = if (today < p.start) p.start else today
+            val n = Dates.daysBetween(from, p.end) + 1
+            status = if (proj > 0) Fmt.money(proj / n) + " por dia (" + n + " dia(s))" else "A previsão fecha no vermelho"
+        }
+        val st = tv(status, 12f, Pal.MUTED)
+        st.setPadding(0, dp(2), 0, 0)
+        card.addView(st)
+
+        val r1 = progressRow("Rendas recebidas", got, got + toGet, Pal.GREEN)
+        val l1 = lp(MATCH, WRAP)
+        l1.topMargin = dp(16)
+        card.addView(r1, l1)
+        val r2 = progressRow("Gastos pagos", paid, paid + toPay, Pal.RED)
+        val l2 = lp(MATCH, WRAP)
+        l2.topMargin = dp(14)
+        card.addView(r2, l2)
+        wrap.addView(card, gap(10))
+
+        if (items.isEmpty()) {
+            wrap.addView(tv("Nenhum lançamento nesse período.", 13f, Pal.MUTED))
+        } else {
+            for (x in items) wrap.addView(itemRow(x), gap(8))
+        }
+        return wrap
+    }
+
+    private fun dateBox(t: String): TextView {
+        val d = tv(t, 16f, Pal.TEXT)
+        d.setPadding(dp(14), dp(12), dp(14), dp(12))
+        d.background = rounded(Pal.SURFACE2, dpf(14f))
+        d.isClickable = true
+        return d
+    }
+
+    private fun pickDate(initial: Int, onPick: (Int) -> Unit) {
+        DatePickerDialog(this, { _, y, m, d -> onPick(y * 10000 + (m + 1) * 100 + d) },
+            initial / 10000, (initial / 100) % 100 - 1, initial % 100).show()
+    }
+
+    private fun periodDialog(ex: Period?) {
+        val v = vbox()
+        v.setPadding(dp(22), dp(4), dp(22), dp(4))
+        val etName = field("Ex.: Até o próximo salário", ex?.name ?: "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        var s = ex?.start ?: Dates.todayKey()
+        var e = ex?.end ?: (Dates.nowYm() * 100 + Dates.daysIn(Dates.nowYm()))
+        v.addView(label("NOME"))
+        v.addView(etName, lp(MATCH, WRAP))
+        v.addView(label("DE"))
+        val sTv = dateBox(Dates.keyLabel(s))
+        sTv.setOnClickListener { pickDate(s) { k -> s = k; sTv.text = Dates.keyLabel(k) } }
+        v.addView(sTv, lp(MATCH, WRAP))
+        v.addView(label("ATÉ"))
+        val eTv = dateBox(Dates.keyLabel(e))
+        eTv.setOnClickListener { pickDate(e) { k -> e = k; eTv.text = Dates.keyLabel(k) } }
+        v.addView(eTv, lp(MATCH, WRAP))
+
+        val sv = ScrollView(this)
+        sv.addView(v)
+        val b = AlertDialog.Builder(this)
+            .setTitle(if (ex == null) "Novo período" else "Editar período")
+            .setView(sv)
+            .setPositiveButton("Salvar", null)
+            .setNegativeButton("Cancelar", null)
+        if (ex != null) b.setNeutralButton("Excluir", null)
+        val dlg = b.create()
+        styleDialog(dlg)
+        dlg.show()
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (e < s) {
+                Toast.makeText(this, "A data final precisa ser depois da inicial", Toast.LENGTH_SHORT).show()
+            } else if (Dates.daysBetween(s, e) > 400) {
+                Toast.makeText(this, "O período pode ter no máximo 400 dias", Toast.LENGTH_SHORT).show()
+            } else {
+                val name = etName.text.toString().trim().ifEmpty { "Período" }
+                store.savePeriod(Period(ex?.id ?: store.newId(), name, s, e))
+                dlg.dismiss()
+                savedScroll = 0
+                render(false)
+            }
+        }
+        if (ex != null) {
+            dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                dlg.dismiss()
+                val d2 = AlertDialog.Builder(this)
+                    .setTitle("Excluir \"" + ex.name + "\"?")
+                    .setMessage("Os lançamentos não são apagados, só o período.")
+                    .setPositiveButton("Excluir") { _, _ ->
+                        store.removePeriod(ex.id)
+                        rerender()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .create()
+                styleDialog(d2)
+                d2.show()
+            }
+        }
     }
 
     // ---------------------------------------------------------------- ajustes

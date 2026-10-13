@@ -29,6 +29,8 @@ data class Item(
 
 data class Stats(val got: Long, val toGet: Long, val paid: Long, val toPay: Long)
 
+data class Period(val id: String, val name: String, val start: Int, val end: Int)
+
 object Dates {
     val months = listOf(
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -58,12 +60,28 @@ object Dates {
     fun today(): Int = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
 
     fun label(ym: Int): String = months[ym % 100 - 1] + " " + (ym / 100)
+
+    fun keyLabel(k: Int): String = "%02d/%02d/%d".format(k % 100, (k / 100) % 100, k / 10000)
+
+    fun todayKey(): Int {
+        val c = Calendar.getInstance()
+        return c.get(Calendar.YEAR) * 10000 + (c.get(Calendar.MONTH) + 1) * 100 + c.get(Calendar.DAY_OF_MONTH)
+    }
+
+    private fun toMillis(k: Int): Long {
+        val c = Calendar.getInstance()
+        c.clear()
+        c.set(k / 10000, (k / 100) % 100 - 1, k % 100)
+        return c.timeInMillis
+    }
+
+    fun daysBetween(a: Int, b: Int): Int = Math.round((toMillis(b) - toMillis(a)) / 86400000.0).toInt()
 }
 
 object Fmt {
     private val nf: NumberFormat = NumberFormat.getCurrencyInstance(Locale("pt", "BR"))
 
-    fun money(c: Long): String = nf.format(c / 100.0).replace('\u00a0', ' ')
+    fun money(c: Long): String = nf.format(c / 100.0)
 
     fun plain(c: Long): String = "%d.%02d".format(c / 100, c % 100)
 
@@ -88,6 +106,7 @@ class Store(ctx: Context) {
     val items = mutableListOf<Item>()
     val ends = mutableMapOf<String, Int>()
     val skips = mutableSetOf<String>()
+    val periods = mutableListOf<Period>()
     var start = 0L
 
     init {
@@ -131,6 +150,13 @@ class Store(ctx: Context) {
             if (s != null) {
                 for (i in 0 until s.length()) skips.add(s.getString(i))
             }
+            val pa = o.optJSONArray("periods")
+            if (pa != null) {
+                for (i in 0 until pa.length()) {
+                    val j = pa.getJSONObject(i)
+                    periods.add(Period(j.getString("id"), j.getString("name"), j.getInt("s"), j.getInt("e")))
+                }
+            }
         } catch (ex: Exception) {
             // dados corrompidos: começa vazio
         }
@@ -162,6 +188,16 @@ class Store(ctx: Context) {
         val s = JSONArray()
         for (k in skips) s.put(k)
         o.put("skips", s)
+        val pa = JSONArray()
+        for (p in periods) {
+            val j = JSONObject()
+            j.put("id", p.id)
+            j.put("name", p.name)
+            j.put("s", p.start)
+            j.put("e", p.end)
+            pa.put(j)
+        }
+        o.put("periods", pa)
         sp.edit().putString("data", o.toString()).apply()
     }
 
@@ -169,6 +205,7 @@ class Store(ctx: Context) {
         items.clear()
         ends.clear()
         skips.clear()
+        periods.clear()
         start = 0L
         save()
     }
@@ -238,4 +275,29 @@ class Store(ctx: Context) {
     }
 
     fun overdueCount(ym: Int): Int = items.count { !it.done && it.ym < ym }
+
+    fun periodItems(p: Period): List<Item> =
+        items.filter { it.key >= p.start && it.key <= p.end }
+            .sortedWith(compareBy({ it.key }, { it.title.lowercase() }))
+
+    /** Saldo atual + tudo que ainda falta receber/pagar até a data final. */
+    fun projectedAt(end: Int): Long {
+        var n = balance()
+        for (i in items) {
+            if (!i.done && i.key <= end) n += if (i.income) i.cents else -i.cents
+        }
+        return n
+    }
+
+    fun savePeriod(p: Period) {
+        val i = periods.indexOfFirst { it.id == p.id }
+        if (i >= 0) periods[i] = p else periods.add(p)
+        periods.sortBy { it.start }
+        save()
+    }
+
+    fun removePeriod(id: String) {
+        periods.removeAll { it.id == id }
+        save()
+    }
 }
